@@ -1,0 +1,471 @@
+// Prisma schema for skooldesk. Mirrors the 22 entities that previously lived
+// in src/db/dexie.js. Naming and types are kept close to the Zod schemas in
+// src/schemas/ so the HTTP adapter can map fields 1:1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Academic ────────────────────────────────────────────────────────────────
+
+model AcademicYear {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  name      String
+  startDate String // YYYY-MM-DD; kept as ISO date string to match client schema
+  endDate   String
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classes       Class[]
+  enrollments   Enrollment[]
+  exams         Exam[]
+  feeStructures FeeStructure[]
+  invoices      Invoice[]
+
+  @@map("academic_years")
+}
+
+model Class {
+  id             Int      @id @default(autoincrement())
+  uuid           String   @unique @default(uuid())
+  name           String
+  academicYearId Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear  AcademicYear   @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  sections      Section[]
+  exams         Exam[]
+  feeStructures FeeStructure[]
+
+  @@index([academicYearId])
+  @@map("classes")
+}
+
+model Section {
+  id             Int      @id @default(autoincrement())
+  uuid           String   @unique @default(uuid())
+  classId        Int
+  name           String
+  classTeacherId Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  class        Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classTeacher Teacher?         @relation("ClassTeacher", fields: [classTeacherId], references: [id], onDelete: SetNull)
+  students     Student[]
+  enrollments  Enrollment[]
+  timetable    TimetableEntry[]
+  attendance   Attendance[]
+
+  @@index([classId])
+  @@map("sections")
+}
+
+model Subject {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timetable TimetableEntry[]
+  examMarks ExamMark[]
+
+  @@map("subjects")
+}
+
+// ── People ──────────────────────────────────────────────────────────────────
+
+model Guardian {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  firstName String
+  lastName  String
+  phone     String
+  email     String?
+  relation  String   @default("guardian") // 'father' | 'mother' | 'guardian'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students Student[]
+
+  @@map("guardians")
+}
+
+model Student {
+  id               Int      @id @default(autoincrement())
+  uuid             String   @unique @default(uuid())
+  admissionNo      String   @unique
+  firstName        String
+  lastName         String
+  dob              String // YYYY-MM-DD
+  gender           String // 'male' | 'female' | 'other'
+  guardianId       Int?
+  currentSectionId Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  guardian       Guardian?    @relation(fields: [guardianId], references: [id], onDelete: SetNull)
+  currentSection Section?     @relation(fields: [currentSectionId], references: [id], onDelete: SetNull)
+  enrollments    Enrollment[]
+  attendance     Attendance[]
+  examMarks      ExamMark[]
+  invoices       Invoice[]
+
+  @@index([guardianId])
+  @@index([currentSectionId])
+  @@map("students")
+}
+
+model Teacher {
+  id         Int      @id @default(autoincrement())
+  uuid       String   @unique @default(uuid())
+  employeeNo String   @unique
+  firstName  String
+  lastName   String
+  email      String   @unique
+  phone      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  classSections    Section[]         @relation("ClassTeacher")
+  timetable        TimetableEntry[]
+  salaryStructures SalaryStructure[]
+  payslips         Payslip[]
+
+  @@map("teachers")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  uuid         String   @unique @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         String // 'owner' | 'admin' | 'teacher' | 'student' | 'parent'
+  name         String?
+  // Loose pointer to the teacher/student row this account represents. Not a
+  // hard FK because the target table depends on `role`.
+  linkedId     Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  attendanceMarked Attendance[]   @relation("MarkedBy")
+  announcements    Announcement[] @relation("AnnouncementAuthor")
+  auditLogs        AuditLog[]     @relation("AuditActor")
+
+  @@map("users")
+}
+
+// ── Enrollment / Timetable / Attendance ─────────────────────────────────────
+
+model Enrollment {
+  id             Int      @id @default(autoincrement())
+  uuid           String   @unique @default(uuid())
+  studentId      Int
+  sectionId      Int
+  academicYearId Int
+  rollNo         String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  section      Section      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+  @@unique([studentId, academicYearId])
+  @@index([sectionId, academicYearId])
+  @@index([academicYearId])
+  @@map("enrollments")
+}
+
+model Period {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  name      String
+  startTime String // HH:MM
+  endTime   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timetable TimetableEntry[]
+
+  @@map("periods")
+}
+
+model TimetableEntry {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  sectionId Int
+  dayOfWeek String // 'Mon' | 'Tue' | ...
+  periodId  Int
+  subjectId Int
+  teacherId Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  period  Period  @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+
+  @@unique([sectionId, dayOfWeek, periodId])
+  @@unique([teacherId, dayOfWeek, periodId])
+  @@map("timetable")
+}
+
+model Attendance {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  sectionId Int
+  date      String // YYYY-MM-DD
+  studentId Int
+  status    String // 'present' | 'absent' | 'late'
+  markedBy  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  marker  User?   @relation("MarkedBy", fields: [markedBy], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, date])
+  @@index([sectionId, date])
+  @@map("attendance")
+}
+
+// ── Exams & Marks ───────────────────────────────────────────────────────────
+
+model Exam {
+  id             Int      @id @default(autoincrement())
+  uuid           String   @unique @default(uuid())
+  name           String
+  academicYearId Int
+  classId        Int
+  // Array of { subjectId, maxMarks }; validated by the Zod schema before insert.
+  subjects       Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  class        Class        @relation(fields: [classId], references: [id], onDelete: Restrict)
+  marks        ExamMark[]
+
+  @@index([academicYearId])
+  @@index([classId])
+  @@map("exams")
+}
+
+model ExamMark {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  examId    Int
+  studentId Int
+  subjectId Int
+  marks     Float
+  grade     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  @@unique([examId, studentId, subjectId])
+  @@map("exam_marks")
+}
+
+// ── Fees ────────────────────────────────────────────────────────────────────
+
+model FeeStructure {
+  id             Int      @id @default(autoincrement())
+  uuid           String   @unique @default(uuid())
+  classId        Int
+  academicYearId Int
+  // Array of { label, amount }.
+  items          Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  class        Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+  @@unique([classId, academicYearId])
+  @@map("fee_structures")
+}
+
+model Invoice {
+  id             Int      @id @default(autoincrement())
+  uuid           String   @unique @default(uuid())
+  studentId      Int
+  academicYearId Int
+  amount         Float
+  dueDate        String // YYYY-MM-DD
+  status         String   @default("pending") // 'pending' | 'partial' | 'paid'
+  // Optional snapshot of the line items at issuance time.
+  items          Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  payments     Payment[]
+
+  @@index([studentId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model Payment {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  invoiceId Int
+  amount    Float
+  paidOn    String // YYYY-MM-DD
+  mode      String   @default("cash")
+  receiptNo String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([paidOn])
+  @@map("payments")
+}
+
+// ── Payroll ─────────────────────────────────────────────────────────────────
+
+model SalaryStructure {
+  id            Int      @id @default(autoincrement())
+  uuid          String   @unique @default(uuid())
+  teacherId     Int
+  effectiveFrom String // YYYY-MM-DD
+  // Array of { label, amount, type: 'earning' | 'deduction' }.
+  components    Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId])
+  @@map("salary_structures")
+}
+
+model Payslip {
+  id         Int      @id @default(autoincrement())
+  uuid       String   @unique @default(uuid())
+  teacherId  Int
+  month      String // YYYY-MM
+  gross      Float
+  deductions Float
+  netAmount  Float
+  status     String   @default("pending") // 'pending' | 'partial' | 'paid'
+  components Json?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  teacher  Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  payments SalaryPayment[]
+
+  @@unique([teacherId, month])
+  @@index([status])
+  @@map("payslips")
+}
+
+model SalaryPayment {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  payslipId Int
+  amount    Float
+  paidOn    String // YYYY-MM-DD
+  mode      String   @default("bank_transfer")
+  reference String?
+  voucherNo String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payslip Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@index([payslipId])
+  @@map("salary_payments")
+}
+
+// ── Announcements / Audit / Profile ─────────────────────────────────────────
+
+model Announcement {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique @default(uuid())
+  title     String
+  body      String
+  audience  String   @default("all") // 'all' | 'admin' | 'teacher' | 'student' | 'parent'
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author User? @relation("AnnouncementAuthor", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([audience])
+  @@index([createdAt])
+  @@map("announcements")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  uuid       String   @unique @default(uuid())
+  entity     String // table name or 'auth'
+  // entityId is loose: most rows reference an integer Prisma id, but some
+  // event rows (e.g. auth events) carry no row reference at all.
+  entityId   Int?
+  entityUuid String?
+  action     String // see AUDIT_ACTIONS in src/schemas/auditLog.js
+  actorId    Int?
+  actorRole  String?
+  actorName  String?
+  changes    Json?
+  before     Json?
+  after      Json?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([entity, createdAt])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+// Singleton row holding the tenant's school profile. Pinned to key=1 so the
+// uniqueness constraint enforces "one row".
+model SchoolProfile {
+  key          Int      @id @default(1)
+  schoolName   String
+  shortName    String
+  tagline      String   @default("")
+  established  Int?
+  contact      Json // { addressLines, phone, email, officeHours }
+  social       Json // [{ label, href }, ...]
+  nav          Json // [{ label, to }, ...]
+  // URLs returned by /uploads. Replaces the old base64 logoDataUrl/faviconDataUrl.
+  logoUrl      String?
+  faviconUrl   String?
+  primaryColor String   @default("#4f46e5")
+  locale       String   @default("en")
+  currency     String   @default("USD")
+  timezone     String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("school_profile")
+}
