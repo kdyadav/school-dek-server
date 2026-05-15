@@ -34,6 +34,7 @@ export async function buildApp(opts = {}) {
   await app.register(cors, {
     origin: config.corsOrigin.includes('*') ? true : config.corsOrigin,
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   })
   await app.register(multipart, {
     limits: { fileSize: 4 * 1024 * 1024 }, // 4 MB cap on uploaded images
