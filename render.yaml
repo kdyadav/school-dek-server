@@ -4,9 +4,12 @@
 # Provisions:
 #   - skooldesk-api      web service (Node, Fastify)
 #   - skooldesk-db       managed Postgres
-#   - persistent disk    mounted at /opt/render/project/src/var/uploads
-#                        so files written by the local storage driver survive
-#                        deploys/restarts.
+#
+# NOTE: Render's free web tier does NOT support persistent disks. The local
+# storage driver will therefore lose uploaded logos/favicons on every deploy
+# or restart. To make uploads durable, either:
+#   1. Upgrade the service to a paid plan and re-add a `disk:` block here, or
+#   2. Implement and switch to an S3-compatible storage driver.
 
 databases:
   - name: skooldesk-db
@@ -25,10 +28,6 @@ services:
     healthCheckPath: /health
     buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy
     startCommand: npm start
-    disk:
-      name: uploads
-      mountPath: /opt/render/project/src/var/uploads
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "20"
@@ -46,10 +45,12 @@ services:
         value: 7d
       - key: BCRYPT_ROUNDS
         value: "10"
+      # Local storage is non-durable on the free tier (no persistent disk).
+      # Uploads land under the project working dir and are wiped each deploy.
       - key: STORAGE_DRIVER
         value: local
       - key: STORAGE_LOCAL_DIR
-        value: /opt/render/project/src/var/uploads
+        value: ./var/uploads
       # Set these from the dashboard once the service URL is known and the UI
       # is deployed. CORS_ORIGIN is comma-separated.
       - key: PUBLIC_BASE_URL
