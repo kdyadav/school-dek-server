@@ -2,3 +2,6 @@ node_modules
 var/
 prisma/migrations/dev.db*
 .DS_Store
+.env
+.env.local
+.env.*.local
