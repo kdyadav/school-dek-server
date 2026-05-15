@@ -1,7 +1,4 @@
 node_modules
-.env
-.env.*
-!.env.example
 var/
 prisma/migrations/dev.db*
 .DS_Store
